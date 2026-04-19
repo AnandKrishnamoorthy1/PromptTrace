@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompttrace"
+version = "0.1.0"
+description = "No-config local prompt tracing for LLM prototyping"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+  { name = "Anand Krishnamoorthy", email = "ananduk1993@gmail.com" }
+]
+license = { text = "MIT" }
+keywords = ["llm", "prompt", "tracing", "debugging", "sqlite"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+
+[project.urls]
+Homepage = "https://github.com/your-org/prompttrace"
+
+[project.scripts]
+prompttrace-ui = "prompt_trace.cli:main"
+
+[tool.setuptools]
+packages = ["prompt_trace"]

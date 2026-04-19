@@ -54,6 +54,20 @@ This generates a standalone HTML dashboard with:
 - Searchable logs table
 - Prompt and response inspection
 
+## Generate demo traces
+
+```bash
+python examples/demo_traces.py --count 5 --db-path ./prompt_trace.db
+```
+
+This creates sample logs automatically so you can open the dashboard immediately after install.
+
+## Run tests
+
+```bash
+python -m unittest discover -s tests
+```
+
 ## Logged schema
 
 Table name: logs

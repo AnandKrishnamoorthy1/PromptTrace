@@ -5,6 +5,7 @@ import json
 import sqlite3
 import time
 from datetime import datetime, timezone
+from contextlib import closing
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -33,7 +34,7 @@ def _resolve_db_path(db_path: str | Path | None) -> Path:
 def _ensure_db(db_path: str | Path | None = None) -> Path:
     resolved = _resolve_db_path(db_path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(resolved) as conn:
+    with closing(sqlite3.connect(resolved)) as conn:
         conn.execute(CREATE_TABLE_SQL)
         conn.commit()
     return resolved
@@ -66,7 +67,7 @@ def _insert_log(
 ) -> None:
     resolved = _ensure_db(db_path)
     timestamp = datetime.now(timezone.utc).isoformat()
-    with sqlite3.connect(resolved) as conn:
+    with closing(sqlite3.connect(resolved)) as conn:
         conn.execute(
             """
             INSERT INTO logs (timestamp, version_tag, model, prompt, response, latency_ms)
@@ -79,7 +80,7 @@ def _insert_log(
 
 def get_logs(db_path: str | Path | None = None) -> List[Dict[str, Any]]:
     resolved = _ensure_db(db_path)
-    with sqlite3.connect(resolved) as conn:
+    with closing(sqlite3.connect(resolved)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """

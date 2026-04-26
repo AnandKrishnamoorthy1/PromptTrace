@@ -22,6 +22,9 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/your-org/prompttrace"
 
+[project.optional-dependencies]
+tokenizer = ["tiktoken>=0.7.0"]
+
 [project.scripts]
 prompttrace-ui = "prompt_trace.cli:main"
 

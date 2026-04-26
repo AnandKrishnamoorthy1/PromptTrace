@@ -37,6 +37,17 @@ def call_llm(prompt: str) -> str:
 print(call_llm("Write me a launch tweet"))
 ```
 
+By default, PromptTrace stores the logical prompt value in the `prompt` column.
+
+Extraction order:
+
+- argument named `prompt`
+- keyword `prompt`
+- first positional argument
+- fallback to full call payload (`args`/`kwargs` JSON)
+
+You can override this with decorator options like `prompt_arg_name="input_text"` or a custom `prompt_extractor` callable.
+
 After running decorated functions, a local SQLite DB is created automatically at:
 
 - ./prompt_trace.db
@@ -53,6 +64,36 @@ This generates a standalone HTML dashboard with:
 - Dark-mode aesthetic
 - Searchable logs table
 - Prompt and response inspection
+- Token usage columns (prompt/completion/total)
+
+## Token usage tracking
+
+PromptTrace tracks token usage using a provider-first strategy:
+
+- Provider-reported usage from result payloads (for example `result.usage` or `result["usage"]`)
+- Local estimation fallback when provider usage is unavailable
+
+Supported provider usage keys:
+
+- `prompt_tokens`, `completion_tokens`, `total_tokens`
+- `input_tokens`, `output_tokens` (auto-mapped)
+
+If `tiktoken` is installed, estimation uses model-aware tokenization. Otherwise, PromptTrace uses a lightweight local approximation.
+
+You can provide your own extractor:
+
+```python
+@trace_prompt(
+  model="gpt-4.1-mini",
+  usage_extractor=lambda result: {
+    "prompt_tokens": result.meta.in_tokens,
+    "completion_tokens": result.meta.out_tokens,
+    "total_tokens": result.meta.in_tokens + result.meta.out_tokens,
+  },
+)
+def call_llm(prompt: str) -> MyResult:
+  ...
+```
 
 ## Generate demo traces
 
@@ -81,6 +122,9 @@ Columns:
 - prompt
 - response
 - latency_ms
+- prompt_tokens
+- completion_tokens
+- total_tokens
 
 ## Project structure
 

@@ -56,6 +56,9 @@ def _build_html(logs: List[Dict[str, Any]], db_path: str) -> str:
               <th class=\"px-4 py-3\">Version</th>
               <th class=\"px-4 py-3\">Model</th>
               <th class=\"px-4 py-3\">Latency (ms)</th>
+              <th class=\"px-4 py-3\">Prompt Tokens</th>
+              <th class=\"px-4 py-3\">Completion Tokens</th>
+              <th class=\"px-4 py-3\">Total Tokens</th>
               <th class=\"px-4 py-3\">Prompt</th>
               <th class=\"px-4 py-3\">Response</th>
             </tr>
@@ -101,6 +104,9 @@ def _build_html(logs: List[Dict[str, Any]], db_path: str) -> str:
           log.version_tag,
           log.model,
           log.latency_ms,
+          log.prompt_tokens,
+          log.completion_tokens,
+          log.total_tokens,
           log.prompt,
           log.response
         ].some((field) => String(field ?? '').toLowerCase().includes(query));
@@ -114,6 +120,9 @@ def _build_html(logs: List[Dict[str, Any]], db_path: str) -> str:
         tr.appendChild(textCell(log.version_tag));
         tr.appendChild(textCell(log.model));
         tr.appendChild(textCell(log.latency_ms));
+        tr.appendChild(textCell(log.prompt_tokens));
+        tr.appendChild(textCell(log.completion_tokens));
+        tr.appendChild(textCell(log.total_tokens));
         tr.appendChild(blockCell(log.prompt));
         tr.appendChild(blockCell(log.response));
         tbody.appendChild(tr);

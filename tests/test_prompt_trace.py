@@ -9,7 +9,7 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from prompt_trace import trace_prompt
+from prompt_trace import trace_prompt, trace_run
 from prompt_trace.cli import main as cli_main
 from prompt_trace.core import get_logs
 
@@ -136,6 +136,51 @@ class TracePromptTests(unittest.TestCase):
                 logs[0]["prompt_tokens"] + logs[0]["completion_tokens"],
             )
 
+    def test_nested_calls_track_parent_child_relationship(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "trace.db"
+
+            @trace_prompt(model="child-model", version_tag="nested", db_path=db_path, agent_name="worker", step_name="child")
+            def child(prompt: str) -> str:
+                return f"child: {prompt}"
+
+            @trace_prompt(model="parent-model", version_tag="nested", db_path=db_path, agent_name="planner", step_name="parent")
+            def parent(prompt: str) -> str:
+                return child(f"subtask for {prompt}")
+
+            parent("build plan")
+
+            logs = sorted(get_logs(db_path), key=lambda row: row["id"])
+            self.assertEqual(len(logs), 2)
+
+            parent_log = logs[0]
+            child_log = logs[1]
+
+            self.assertIsNotNone(parent_log["run_id"])
+            self.assertEqual(parent_log["run_id"], child_log["run_id"])
+            self.assertEqual(child_log["parent_trace_id"], parent_log["trace_id"])
+            self.assertEqual(parent_log["agent_name"], "planner")
+            self.assertEqual(child_log["agent_name"], "worker")
+            self.assertEqual(parent_log["step_name"], "parent")
+            self.assertEqual(child_log["step_name"], "child")
+
+    def test_trace_run_sets_explicit_run_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "trace.db"
+
+            @trace_prompt(model="run-model", version_tag="run", db_path=db_path)
+            def step(prompt: str) -> str:
+                return f"ok: {prompt}"
+
+            with trace_run("run-123"):
+                step("hello")
+
+            logs = get_logs(db_path)
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0]["run_id"], "run-123")
+            self.assertIsNone(logs[0]["parent_trace_id"])
+            self.assertEqual(logs[0]["step_name"], "step")
+
 
 class CliTests(unittest.TestCase):
     def test_cli_generates_standalone_html(self) -> None:
@@ -170,6 +215,18 @@ class CliTests(unittest.TestCase):
             self.assertIn("Prompt Tokens", html)
             self.assertIn("Completion Tokens", html)
             self.assertIn("Total Tokens", html)
+            self.assertIn("Run", html)
+            self.assertIn("Trace", html)
+            self.assertIn("Parent Trace", html)
+            self.assertIn("Table View", html)
+            self.assertIn("Compact Tree View", html)
+            self.assertIn("Expand All", html)
+            self.assertIn("Collapse All", html)
+            self.assertIn("runHeaderRow", html)
+            self.assertIn("toggleRun", html)
+            self.assertIn("toggleNode", html)
+            self.assertIn("expandAllTree", html)
+            self.assertIn("collapseAllTree", html)
 
 
 if __name__ == "__main__":

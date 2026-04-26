@@ -4,11 +4,13 @@ import inspect
 import json
 import sqlite3
 import time
+from contextlib import closing, contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
-from contextlib import closing
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Dict, List
+from uuid import uuid4
 
 try:
     import tiktoken
@@ -16,6 +18,9 @@ except ImportError:
     tiktoken = None
 
 DEFAULT_DB_PATH = Path("./prompt_trace.db")
+
+_active_run_id: ContextVar[str | None] = ContextVar("_active_run_id", default=None)
+_active_trace_id: ContextVar[str | None] = ContextVar("_active_trace_id", default=None)
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS logs (
@@ -28,7 +33,12 @@ CREATE TABLE IF NOT EXISTS logs (
     latency_ms INTEGER,
     prompt_tokens INTEGER,
     completion_tokens INTEGER,
-    total_tokens INTEGER
+    total_tokens INTEGER,
+    run_id TEXT,
+    trace_id TEXT,
+    parent_trace_id TEXT,
+    agent_name TEXT,
+    step_name TEXT
 );
 """
 
@@ -36,6 +46,14 @@ TOKEN_COLUMNS = {
     "prompt_tokens": "INTEGER",
     "completion_tokens": "INTEGER",
     "total_tokens": "INTEGER",
+}
+
+TRACE_COLUMNS = {
+    "run_id": "TEXT",
+    "trace_id": "TEXT",
+    "parent_trace_id": "TEXT",
+    "agent_name": "TEXT",
+    "step_name": "TEXT",
 }
 
 
@@ -55,6 +73,9 @@ def _ensure_db(db_path: str | Path | None = None) -> Path:
             for row in conn.execute("PRAGMA table_info(logs)").fetchall()
         }
         for col_name, col_type in TOKEN_COLUMNS.items():
+            if col_name not in existing_columns:
+                conn.execute(f"ALTER TABLE logs ADD COLUMN {col_name} {col_type}")
+        for col_name, col_type in TRACE_COLUMNS.items():
             if col_name not in existing_columns:
                 conn.execute(f"ALTER TABLE logs ADD COLUMN {col_name} {col_type}")
         conn.commit()
@@ -211,6 +232,11 @@ def _insert_log(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
+    run_id: str | None = None,
+    trace_id: str | None = None,
+    parent_trace_id: str | None = None,
+    agent_name: str | None = None,
+    step_name: str | None = None,
 ) -> None:
     resolved = _ensure_db(db_path)
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -226,9 +252,14 @@ def _insert_log(
                 latency_ms,
                 prompt_tokens,
                 completion_tokens,
-                total_tokens
+                total_tokens,
+                run_id,
+                trace_id,
+                parent_trace_id,
+                agent_name,
+                step_name
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 timestamp,
@@ -240,9 +271,27 @@ def _insert_log(
                 prompt_tokens,
                 completion_tokens,
                 total_tokens,
+                run_id,
+                trace_id,
+                parent_trace_id,
+                agent_name,
+                step_name,
             ),
         )
         conn.commit()
+
+
+@contextmanager
+def trace_run(run_id: str | None = None):
+    """Create an explicit run boundary for nested traced calls."""
+    resolved_run_id = run_id or str(uuid4())
+    run_token = _active_run_id.set(resolved_run_id)
+    trace_token = _active_trace_id.set(None)
+    try:
+        yield resolved_run_id
+    finally:
+        _active_trace_id.reset(trace_token)
+        _active_run_id.reset(run_token)
 
 
 def get_logs(db_path: str | Path | None = None) -> List[Dict[str, Any]]:
@@ -261,7 +310,12 @@ def get_logs(db_path: str | Path | None = None) -> List[Dict[str, Any]]:
                 latency_ms,
                 prompt_tokens,
                 completion_tokens,
-                total_tokens
+                total_tokens,
+                run_id,
+                trace_id,
+                parent_trace_id,
+                agent_name,
+                step_name
             FROM logs
             ORDER BY id DESC
             """
@@ -278,6 +332,8 @@ def trace_prompt(
     prompt_arg_name: str = "prompt",
     prompt_extractor: Callable[[tuple[Any, ...], Dict[str, Any], Dict[str, Any]], Any] | None = None,
     usage_extractor: Callable[[Any], Dict[str, int] | None] | None = None,
+    agent_name: str | None = None,
+    step_name: str | None = None,
 ) -> Callable[..., Any]:
     """Decorator that traces prompt-like function calls into SQLite.
 
@@ -286,9 +342,20 @@ def trace_prompt(
 
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         func_signature = inspect.signature(func)
+        resolved_step_name = step_name or func.__name__
 
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            current_run_id = _active_run_id.get()
+            run_token = None
+            if current_run_id is None:
+                current_run_id = str(uuid4())
+                run_token = _active_run_id.set(current_run_id)
+
+            parent_trace_id = _active_trace_id.get()
+            current_trace_id = str(uuid4())
+            trace_token = _active_trace_id.set(current_trace_id)
+
             started = time.perf_counter()
             prompt_value = _extract_prompt_value(
                 signature=func_signature,
@@ -300,6 +367,7 @@ def trace_prompt(
             call_prompt = _serialize(prompt_value)
             selected_model = _extract_model(model, kwargs)
             token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            response_payload = ""
             try:
                 result = func(*args, **kwargs)
                 response_payload = _serialize(result)
@@ -326,10 +394,28 @@ def trace_prompt(
                     prompt_tokens=token_usage["prompt_tokens"],
                     completion_tokens=token_usage["completion_tokens"],
                     total_tokens=token_usage["total_tokens"],
+                    run_id=current_run_id,
+                    trace_id=current_trace_id,
+                    parent_trace_id=parent_trace_id,
+                    agent_name=agent_name,
+                    step_name=resolved_step_name,
                 )
+                _active_trace_id.reset(trace_token)
+                if run_token is not None:
+                    _active_run_id.reset(run_token)
 
         @wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            current_run_id = _active_run_id.get()
+            run_token = None
+            if current_run_id is None:
+                current_run_id = str(uuid4())
+                run_token = _active_run_id.set(current_run_id)
+
+            parent_trace_id = _active_trace_id.get()
+            current_trace_id = str(uuid4())
+            trace_token = _active_trace_id.set(current_trace_id)
+
             started = time.perf_counter()
             prompt_value = _extract_prompt_value(
                 signature=func_signature,
@@ -341,6 +427,7 @@ def trace_prompt(
             call_prompt = _serialize(prompt_value)
             selected_model = _extract_model(model, kwargs)
             token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+            response_payload = ""
             try:
                 result = await func(*args, **kwargs)
                 response_payload = _serialize(result)
@@ -367,7 +454,15 @@ def trace_prompt(
                     prompt_tokens=token_usage["prompt_tokens"],
                     completion_tokens=token_usage["completion_tokens"],
                     total_tokens=token_usage["total_tokens"],
+                    run_id=current_run_id,
+                    trace_id=current_trace_id,
+                    parent_trace_id=parent_trace_id,
+                    agent_name=agent_name,
+                    step_name=resolved_step_name,
                 )
+                _active_trace_id.reset(trace_token)
+                if run_token is not None:
+                    _active_run_id.reset(run_token)
 
         if inspect.iscoroutinefunction(func):
             return async_wrapper

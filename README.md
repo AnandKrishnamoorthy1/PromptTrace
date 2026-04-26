@@ -65,6 +65,39 @@ This generates a standalone HTML dashboard with:
 - Searchable logs table
 - Prompt and response inspection
 - Token usage columns (prompt/completion/total)
+- Run/trace hierarchy columns for multi-agent flows
+- Table View and Compact Tree View modes for execution threads
+- Collapsible runs and branches in Compact Tree View
+- Expand All and Collapse All controls for thread navigation
+
+## Multi-agent parent/child tracing
+
+PromptTrace now tracks nested decorated calls automatically:
+
+- `run_id`: shared across a full traced execution
+- `trace_id`: unique ID for each step
+- `parent_trace_id`: links child steps to parent steps
+- `agent_name`: optional agent label
+- `step_name`: step label (defaults to function name)
+
+Example:
+
+```python
+from prompt_trace import trace_prompt, trace_run
+
+@trace_prompt(model="gpt-4.1-mini", agent_name="planner", step_name="plan")
+def planner(prompt: str) -> str:
+  return worker(f"subtask for {prompt}")
+
+@trace_prompt(model="gpt-4.1-mini", agent_name="worker", step_name="execute")
+def worker(prompt: str) -> str:
+  return f"done: {prompt}"
+
+with trace_run("demo-run"):
+  planner("build growth strategy")
+```
+
+In the logs, `execute` is automatically linked to `plan` via `parent_trace_id`.
 
 ## Token usage tracking
 
@@ -125,6 +158,11 @@ Columns:
 - prompt_tokens
 - completion_tokens
 - total_tokens
+- run_id
+- trace_id
+- parent_trace_id
+- agent_name
+- step_name
 
 ## Project structure
 

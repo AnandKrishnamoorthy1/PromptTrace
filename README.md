@@ -29,7 +29,7 @@ pip install -e .
 ```python
 from prompt_trace import trace_prompt
 
-@trace_prompt(model="gpt-4.1-mini", version_tag="draft-v1")
+@trace_prompt(model="gpt-4o-mini", version_tag="draft-v1")
 def call_llm(prompt: str) -> str:
     # Replace with your provider SDK call
     return f"Echo: {prompt}"

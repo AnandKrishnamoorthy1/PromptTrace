@@ -35,3 +35,5 @@ The example also exposes `build_adk_workflow()` for constructing the real ADK ag
 - `LlmAgent` for each specialist agent
 
 The ADK graph mirrors the local traced workflow, so the same structure is visible in both the code and the PromptTrace logs.
+
+Note: `run_local_workflow()` is a local PromptTrace-only demo that does not require ADK runtime services. `build_adk_workflow()` is the ADK graph builder and requires `google-adk` to be installed.
